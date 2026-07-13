@@ -3,13 +3,13 @@
   <requires lib="gtk" version="4.0"/>
   <requires lib="Adw" version="1.0"/>
   <template class="AgeverificationWindow" parent="AdwApplicationWindow">
-    <property name="title" translatable="yes">AgeVerification</property>
-    <property name="default-width">800</property>
-    <property name="default-height">600</property>
+    <property name="title" translatable="yes">Age Verification</property>
+    <property name="default-width">900</property>
+    <property name="default-height">640</property>
     <property name="content">
       <object class="AdwToolbarView">
         <child type="top">
-          <object class="AdwHeaderBar">
+          <object class="AdwHeaderBar" id="header_bar">
             <child type="end">
               <object class="GtkMenuButton">
                 <property name="primary">True</property>
@@ -21,11 +21,10 @@
           </object>
         </child>
         <property name="content">
-          <object class="GtkLabel" id="label">
-            <property name="label" translatable="yes">Hello, World!</property>
-            <style>
-              <class name="title-1"/>
-            </style>
+          <object class="GtkStack" id="stack">
+            <property name="transition-type">crossfade</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
           </object>
         </property>
       </object>
@@ -34,15 +33,15 @@
   <menu id="primary_menu">
     <section>
       <item>
-        <attribute name="label" translatable="yes">_Preferences</attribute>
-        <attribute name="action">app.preferences</attribute>
+        <attribute name="label" translatable="yes">_Restart Test</attribute>
+        <attribute name="action">app.restart</attribute>
       </item>
       <item>
         <attribute name="label" translatable="yes">_Keyboard Shortcuts</attribute>
         <attribute name="action">app.shortcuts</attribute>
       </item>
       <item>
-        <attribute name="label" translatable="yes">_About AgeVerification</attribute>
+        <attribute name="label" translatable="yes">_About Age Verification</attribute>
         <attribute name="action">app.about</attribute>
       </item>
     </section>
