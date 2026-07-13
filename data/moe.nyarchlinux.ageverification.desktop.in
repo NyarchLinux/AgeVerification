@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=AgeVerification
+Exec=ageverification
+Icon=moe.nyarchlinux.ageverification
+Terminal=false
+Type=Application
+Categories=Utility;
+Keywords=GTK;
+StartupNotify=true
+DBusActivatable=true

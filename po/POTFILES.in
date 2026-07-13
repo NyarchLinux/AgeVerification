@@ -1,0 +1,8 @@
+# List of source files containing translatable strings.
+# Please keep this file sorted alphabetically.
+data/moe.nyarchlinux.ageverification.desktop.in
+data/moe.nyarchlinux.ageverification.metainfo.xml.in
+data/moe.nyarchlinux.ageverification.gschema.xml
+src/main.py
+src/window.py
+src/window.ui

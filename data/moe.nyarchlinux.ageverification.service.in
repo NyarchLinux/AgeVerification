@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=moe.nyarchlinux.ageverification
+Exec=@bindir@/ageverification --gapplication-service
