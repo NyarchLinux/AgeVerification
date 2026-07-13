@@ -299,24 +299,19 @@ class AgeverificationWindow(Adw.ApplicationWindow):
         return sidebar
 
     def _build_subway_button(self):
+        # Just the logo, no button chrome — still clickable to open the flap.
         btn = Gtk.Button()
-        btn.add_css_class("suggested-action")
-        btn.add_css_class("pill")
+        btn.set_has_frame(False)
         btn.set_tooltip_text("Watch some Subway Surfers")
         btn.set_valign(Gtk.Align.END)
         btn.set_halign(Gtk.Align.CENTER)
 
-        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        logo = assets.load_image("subway-surfers-logo.svg", pixel_size=56)
+        logo = assets.load_image("subway-surfers-logo.svg", pixel_size=128)
         if logo is None:
             logo = Gtk.Image.new_from_icon_name(
                 "media-playback-start-symbolic")
-            logo.set_pixel_size(48)
-        inner.append(logo)
-        lbl = Gtk.Label(label="Subway Surfers")
-        lbl.add_css_class("heading")
-        inner.append(lbl)
-        btn.set_child(inner)
+            logo.set_pixel_size(96)
+        btn.set_child(logo)
 
         btn.connect("clicked", self._on_subway_clicked)
         return btn
