@@ -10,6 +10,12 @@
       <object class="AdwToolbarView">
         <child type="top">
           <object class="AdwHeaderBar" id="header_bar">
+            <child type="start">
+              <object class="GtkToggleButton" id="mute_button">
+                <property name="tooltip-text" translatable="yes">Mute/Unmute</property>
+                <property name="icon-name">audio-volume-high-symbolic</property>
+              </object>
+            </child>
             <child type="end">
               <object class="GtkMenuButton">
                 <property name="primary">True</property>
