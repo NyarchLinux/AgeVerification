@@ -77,7 +77,7 @@ QUESTIONS = [
             {"image": "macos.png",        "age": 3, "weight": 0.2,
              "transition": {"message": "Mhmm.", "image": "thinking.png"}},
             {"image": "nyarch.png", "text": None,       "age": 19, "weight": 0.4,
-             "transition": {"message": "I use Nyarch btw.", "image": "nya.jpg"}},
+             "transition": {"message": "I use Nyarch btw.", "image": "nice.png"}},
             {"image": "lunduke.png", "text": None,    "age": 45, "weight": 1.0,
              "transition": {"message": "Retro computing journalist energy.", "image": "thinking.png", "sound": "lund.mp3"}},
             {"image": "winzoz.jpg","age": 30, "weight": 1.0,

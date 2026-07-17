@@ -129,7 +129,7 @@ class AgeverificationWindow(Adw.ApplicationWindow):
         box = self._vbox(spacing=24, halign=Gtk.Align.CENTER,
                          valign=Gtk.Align.CENTER, margin=36)
 
-        logo = assets.load_image("logo.png", pixel_size=160)
+        logo = assets.load_image("nyarch-logo.svg", pixel_size=160)
         if logo is None:
             logo = Gtk.Image.new_from_icon_name(
                 "applications-games-symbolic")
