@@ -31,3 +31,8 @@ Performs better than ID verification on all evaluation metrics:
 
 Download the .flatpak file form releases and install it.
 
+### Vibe-coding notice 
+
+This project was entirely vibecoded using Emma-3, Supreme Superior Italian AI advanced Intelligence ++ super duper epic absurd.
+
+
