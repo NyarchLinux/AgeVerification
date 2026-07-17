@@ -30,6 +30,14 @@ ageverification_sources = [
   '__init__.py',
   'main.py',
   'window.py',
+  'questions.py',
+  'assets.py',
 ]
 
 install_data(ageverification_sources, install_dir: moduledir)
+
+# Media assets (logos, optional subway video, question/option/transition images).
+# install_subdir keeps the source dir name, so this lands at <moduledir>/assets/
+# which is exactly where assets.py looks. Replacing files in-place under
+# src/assets/ is enough — no rebuild of code.
+install_subdir('assets', install_dir: moduledir)

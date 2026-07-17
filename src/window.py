@@ -1,23 +1,4 @@
-# window.py
-#
-# Copyright 2026 Unknown
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
-#
-# SPDX-License-Identifier: GPL-3.0-or-later
 
-import math
 import random
 
 from gi.repository import Adw, Gtk, Gdk, GLib
@@ -25,9 +6,8 @@ from gi.repository import Adw, Gtk, Gdk, GLib
 from . import assets
 from .questions import (
     QUESTIONS,
-    SUBWAY_BREAKPOINT_SEC,
+    SUBWAY_SECS_PER_YEAR,
     SUBWAY_MAX_DISCOUNT,
-    SUBWAY_CAP_SEC,
     EVAL_DURATION_SEC,
     EVAL_SUBTITLE_INTERVAL_SEC,
     EVAL_SUBTITLES,
@@ -51,6 +31,9 @@ class AgeverificationWindow(Adw.ApplicationWindow):
     __gtype_name__ = "AgeverificationWindow"
 
     stack = Gtk.Template.Child()
+    subway_flap = Gtk.Template.Child()
+    subway_flap_content = Gtk.Template.Child()
+    mute_button = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -61,13 +44,26 @@ class AgeverificationWindow(Adw.ApplicationWindow):
         self._subway_ms = 0          # accumulated Subway Surfers watch time (ms)
         self._subway_ticking = False
         self._subway_timeout_id = None
-        self._media = None           # Gtk.MediaFile for the subway video
-        self._flap = None
+        self._media = None           # Gtk.MediaFile for the subway video (persistent)
         self._eval_timeout_ids = []  # running evaluation timers (for cleanup)
+        self._bg_sound = None        # looping quiz background stream
+        self._bg_sound_enabled = True
+        self._transition_sound = None  # one-shot transition sound stream
+        # Streams no longer in use but kept alive until their GStreamer pipeline
+        # settles, to avoid spurious "g_object_unref: G_IS_OBJECT" warnings from
+        # finalizing a still-realizing GtkMediaFile.
+        self._gc_sounds = []
+        self._muted = False            # global mute state (applies to all audio)
 
         # --- screens -------------------------------------------------------
         self._build_welcome()
         # quiz / transition / evaluation / result screens are built on demand
+
+        # --- persistent Subway Surfers flap (wraps the whole stack) -------
+        self._init_subway_flap()
+
+        # mute/unmute toggle in the header bar
+        self.mute_button.connect("toggled", self._on_mute_toggled)
 
         self.stack.set_visible_child_name("welcome")
 
@@ -93,6 +89,26 @@ class AgeverificationWindow(Adw.ApplicationWindow):
                 btn.add_css_class(c)
         return btn
 
+    # ---- mute / unmute -------------------------------------------------
+    def _on_mute_toggled(self, btn):
+        self._muted = btn.get_active()
+        btn.set_icon_name(
+            "audio-volume-muted-symbolic" if self._muted
+            else "audio-volume-high-symbolic")
+        btn.set_tooltip_text(
+            "Unmute" if self._muted else "Mute")
+        self._apply_mute()
+
+    def _apply_mute(self):
+        """Apply the current mute state to every live audio stream."""
+        for media in (self._bg_sound, self._transition_sound, self._media):
+            if media is None:
+                continue
+            try:
+                media.set_muted(self._muted)
+            except Exception:
+                pass
+
     @staticmethod
     def _vbox(spacing=12, halign=Gtk.Align.FILL, valign=Gtk.Align.FILL,
               margin=0):
@@ -113,7 +129,7 @@ class AgeverificationWindow(Adw.ApplicationWindow):
         box = self._vbox(spacing=24, halign=Gtk.Align.CENTER,
                          valign=Gtk.Align.CENTER, margin=36)
 
-        logo = assets.load_image("nyarch-logo.svg", pixel_size=160)
+        logo = assets.load_image("logo.png", pixel_size=160)
         if logo is None:
             logo = Gtk.Image.new_from_icon_name(
                 "applications-games-symbolic")
@@ -151,9 +167,12 @@ class AgeverificationWindow(Adw.ApplicationWindow):
         self._q_index = 0
         self._answers = []
         self._subway_ms = 0
-        self._stop_subway_ticking()
-        self._teardown_media()
         self._cancel_eval_timers()
+        self._stop_background_sound()
+        self._stop_transition_sound()
+        self._gc_sounds.clear()
+        # hide the subway overlay on restart (keep the media stream alive)
+        self._hide_subway()
 
     # ------------------------------------------------------------------ #
     # Screen: Quiz (Spec 3)
@@ -210,22 +229,8 @@ class AgeverificationWindow(Adw.ApplicationWindow):
         sidebar = self._build_sidebar()
         content_area.append(sidebar)
 
-        # ---- flap wrapping everything (Spec 3) -------------------------
-        flap = Adw.Flap()
-        flap.set_fold_policy(Adw.FlapFoldPolicy.NEVER)
-        flap.set_flap_position(Gtk.PackType.END)   # reveal from the right
-        flap.set_transition_type(Adw.FlapTransitionType.OVER)
-        flap.set_locked(True)
-        flap.set_modal(False)
-        flap.set_content(content_area)
-        flap.set_flap(self._build_subway_flap_content())
-        flap.set_reveal_flap(False)
-
-        # when reveal state changes, start/stop the video + ticking
-        flap.connect("notify::reveal-flap", self._on_flap_reveal_changed)
-
-        self._flap = flap
-        self._push(flap, "quiz")
+        self._push(content_area, "quiz")
+        self._start_background_sound()
 
     # ---- option button -------------------------------------------------
     def _build_option_button(self, index, opt):
@@ -247,15 +252,18 @@ class AgeverificationWindow(Adw.ApplicationWindow):
         inner.append(letter_lbl)
 
         if opt.get("image"):
-            oimg = assets.load_image(opt["image"], pixel_size=48)
+            oimg = assets.load_image(opt["image"], pixel_size=128)
             if oimg is not None:
                 inner.append(oimg)
 
-        text = Gtk.Label(label=opt["text"])
-        text.set_wrap(True)
-        text.set_hexpand(True)
-        text.set_xalign(0.0)
-        inner.append(text)
+        # Text is optional: an option may be image-only.
+        opt_text = opt.get("text")
+        if opt_text:
+            text = Gtk.Label(label=opt_text)
+            text.set_wrap(True)
+            text.set_hexpand(True)
+            text.set_xalign(0.0)
+            inner.append(text)
 
         btn.set_child(inner)
         btn.connect("clicked", self._on_answer, opt)
@@ -316,31 +324,28 @@ class AgeverificationWindow(Adw.ApplicationWindow):
         btn.connect("clicked", self._on_subway_clicked)
         return btn
 
-    # ---- subway flap content (portrait video) -------------------------
-    def _build_subway_flap_content(self):
-        # portrait 9:16 container
+    # ---- Subway Surfers persistent flap ---------------------------------
+    # The flap wraps the entire GtkStack, so it's created once in the .ui and
+    # persists across all screens (quiz, transition, etc.). Revealing the flap
+    # shrinks the content to make room — nothing gets covered.
+
+    def _init_subway_flap(self):
+        """Populate the flap with the video widget and wire reveal changes."""
         frame = Gtk.AspectFrame.new(0.5, 0.5, 9.0 / 16.0, False)
-        frame.set_size_request(253, 450)  # ~9:16
-        frame.set_halign(Gtk.Align.CENTER)
-        frame.set_valign(Gtk.Align.CENTER)
-        frame.set_margin_start(12)
-        frame.set_margin_end(12)
-        frame.set_margin_top(12)
-        frame.set_margin_bottom(12)
+        frame.set_size_request(253, 450)
 
         media = assets.media_file("subway_surfers.mp4")
         if media is not None:
-            # Spec 3: no controls, with audio, looping.
+            self._media = media
             media.set_loop(True)
             try:
-                media.set_muted(False)
+                media.set_muted(self._muted)
             except Exception:
                 pass
             try:
                 media.set_volume(1.0)
             except Exception:
                 pass
-            self._media = media
             picture = Gtk.Picture()
             picture.set_paintable(media)
             picture.set_content_fit(Gtk.ContentFit.FILL)
@@ -358,20 +363,27 @@ class AgeverificationWindow(Adw.ApplicationWindow):
             msg.add_css_class("title-4")
             ph.append(msg)
             frame.set_child(ph)
-        return frame
 
-    # ---- subway plumbing ----------------------------------------------
+        self.subway_flap_content.append(frame)
+        self.subway_flap.connect("notify::reveal-flap",
+                                 self._on_flap_reveal_changed)
+
     def _on_subway_clicked(self, *_):
-        if self._flap is None:
-            return
-        self._flap.set_reveal_flap(not self._flap.get_reveal_flap())
+        """Toggle the Subway Surfers flap."""
+        self.subway_flap.set_reveal_flap(
+            not self.subway_flap.get_reveal_flap())
 
-    def _on_flap_reveal_changed(self, flap, _pspec):
-        revealed = flap.get_reveal_flap()
-        if revealed:
+    def _on_flap_reveal_changed(self, _flap, _pspec):
+        if self.subway_flap.get_reveal_flap():
             self._start_subway()
         else:
             self._stop_subway()
+
+    def _show_subway(self):
+        self.subway_flap.set_reveal_flap(True)
+
+    def _hide_subway(self):
+        self.subway_flap.set_reveal_flap(False)
 
     def _start_subway(self):
         if self._media is not None:
@@ -395,9 +407,7 @@ class AgeverificationWindow(Adw.ApplicationWindow):
         if self._subway_ticking:
             return
         self._subway_ticking = True
-        # tick every second, accumulate watch time
-        self._subway_timeout_id = GLib.timeout_add(1000,
-                                                   self._subway_tick)
+        self._subway_timeout_id = GLib.timeout_add(1000, self._subway_tick)
 
     def _stop_subway_ticking(self):
         self._subway_ticking = False
@@ -411,29 +421,81 @@ class AgeverificationWindow(Adw.ApplicationWindow):
         self._subway_ms += 1000
         return GLib.SOURCE_CONTINUE
 
-    def _teardown_media(self):
-        self._media = None
-        self._flap = None
+    # ---- background + transition sound --------------------------------
+    def _start_background_sound(self):
+        """Start the looping quiz background track (if enabled & available)."""
+        if not self._bg_sound_enabled:
+            return
+        if self._bg_sound is not None:
+            return  # already playing
+        media = assets.sound_stream(assets.QUIZ_BACKGROUND_SOUND,
+                                    loop=True, volume=0.5)
+        if media is None:
+            return
+        self._bg_sound = media
+        try:
+            media.set_muted(self._muted)
+            media.play()
+            media.set_playing(True)
+        except Exception:
+            pass
+
+    def _stop_background_sound(self):
+        """Stop and release the background track."""
+        if self._bg_sound is not None:
+            self._release_sound(self._bg_sound)
+            self._bg_sound = None
+
+    def _stop_transition_sound(self):
+        if self._transition_sound is not None:
+            snd = self._transition_sound
+            self._transition_sound = None
+            # GstSound (direct pipeline) needs explicit stop(); GtkMediaFile
+            # uses the deferred-release path.
+            if hasattr(snd, "stop"):
+                snd.stop()
+            else:
+                self._release_sound(snd)
+
+    def _release_sound(self, media):
+        """Pause a stream and defer its release until the pipeline settles."""
+        try:
+            media.pause()
+            media.set_playing(False)
+        except Exception:
+            pass
+        # Keep a reference a little longer; clear it on the next idle tick so the
+        # GStreamer backend finalizes cleanly instead of warning.
+        self._gc_sounds.append(media)
+        GLib.idle_add(self._gc_drain)
+
+    def _gc_drain(self):
+        # Drop one batch; keep it bounded so the list never grows unbounded.
+        del self._gc_sounds[:]
+        return GLib.SOURCE_REMOVE
 
     # ------------------------------------------------------------------ #
     # Answering + transitions (Spec 3)
     # ------------------------------------------------------------------ #
     def _on_answer(self, _btn, opt):
         self._answers.append((opt.get("age", 30), opt.get("weight", 1.0)))
-        # close subway if open before moving on
-        if self._flap is not None and self._flap.get_reveal_flap():
-            self._flap.set_reveal_flap(False)
-        self._stop_subway()
+        # The Subway Surfers overlay stays open if it was open — it floats
+        # above all screens. Just stop the background loop.
+        self._stop_background_sound()
 
         transition = opt.get("transition") or {}
         self._show_transition(
             transition.get("message", "..."),
             transition.get("image"),
+            transition.get("sound"),
         )
 
-    def _show_transition(self, message, image_name):
-        box = self._vbox(spacing=24, halign=Gtk.Align.CENTER,
-                         valign=Gtk.Align.CENTER, margin=36)
+    def _show_transition(self, message, image_name, sound_name=None):
+        # Simple centered content. The Subway Surfers overlay (if open) floats
+        # above independently — no need to embed it here.
+        content = self._vbox(spacing=24, halign=Gtk.Align.CENTER,
+                             valign=Gtk.Align.CENTER, margin=36)
+        content.set_hexpand(True)
 
         if image_name:
             img = assets.load_image(image_name, pixel_size=180)
@@ -442,20 +504,31 @@ class AgeverificationWindow(Adw.ApplicationWindow):
         if img is None:
             img = Gtk.Image.new_from_icon_name("emblem-ok-symbolic")
             img.set_pixel_size(96)
-        box.append(img)
+        content.append(img)
 
         lbl = Gtk.Label(label=message)
         lbl.set_wrap(True)
         lbl.set_justify(Gtk.Justification.CENTER)
         lbl.set_max_width_chars(50)
         lbl.add_css_class("title-2")
-        box.append(lbl)
+        content.append(lbl)
 
-        self._push(box, "transition")
+        # Optional sound: a per-transition clip if provided, else the default.
+        self._stop_transition_sound()
+        snd_name = sound_name or assets.DEFAULT_TRANSITION_SOUND
+        self._transition_sound = assets.play_sound_once(snd_name)
+        if self._transition_sound is not None and self._muted:
+            try:
+                self._transition_sound.set_muted(True)
+            except Exception:
+                pass
+
+        self._push(content, "transition")
 
         GLib.timeout_add(TRANSITION_MS, self._after_transition)
 
     def _after_transition(self):
+        self._stop_transition_sound()
         self._q_index += 1
         self._show_question()
         return GLib.SOURCE_REMOVE
@@ -487,9 +560,10 @@ class AgeverificationWindow(Adw.ApplicationWindow):
     # Screen: AI Evaluation (Spec 5)
     # ------------------------------------------------------------------ #
     def _show_evaluation(self):
-        # make sure subway is fully stopped
-        self._stop_subway()
-        self._teardown_media()
+        # hide subway overlay + stop all audio
+        self._hide_subway()
+        self._stop_background_sound()
+        self._stop_transition_sound()
 
         box = self._vbox(spacing=18, halign=Gtk.Align.CENTER,
                          valign=Gtk.Align.CENTER, margin=36)
@@ -578,15 +652,10 @@ class AgeverificationWindow(Adw.ApplicationWindow):
         else:
             base_age = sum(a * w for a, w in self._answers) / total_w
 
-        # B. Subway Surfers discount: logarithmic, up to 10y if > 2 min
+        # B. Subway Surfers discount: -1 year per SUBWAY_SECS_PER_YEAR seconds
+        # watched (10s -> -1y, 20s -> -2y, ...), capped at SUBWAY_MAX_DISCOUNT.
         secs = self._subway_ms / 1000.0
-        if secs <= SUBWAY_BREAKPOINT_SEC:
-            discount = 0.0
-        else:
-            extra = secs - SUBWAY_BREAKPOINT_SEC
-            denom = math.log(1 + (SUBWAY_CAP_SEC - SUBWAY_BREAKPOINT_SEC))
-            discount = SUBWAY_MAX_DISCOUNT * math.log(1 + extra) / max(denom, 1e-9)
-            discount = min(SUBWAY_MAX_DISCOUNT, max(0.0, discount))
+        discount = min(SUBWAY_MAX_DISCOUNT, secs / SUBWAY_SECS_PER_YEAR)
 
         final = int(round(base_age - discount))
         final = max(0, min(120, final))
@@ -601,10 +670,36 @@ class AgeverificationWindow(Adw.ApplicationWindow):
     def _show_result(self):
         res = self._compute_result()
         final = res["final"]
+        allowed = final >= 18
 
         box = self._vbox(spacing=18, halign=Gtk.Align.CENTER,
                          valign=Gtk.Align.CENTER, margin=36)
 
+        # ---- verdict: large icon + status message ----------------------
+        verdict_icon = Gtk.Image.new_from_icon_name(
+            "object-select-symbolic" if allowed
+            else "action-unavailable-symbolic")
+        verdict_icon.set_pixel_size(96)
+        # green check / red denied
+        verdict_icon.add_css_class(
+            "success" if allowed else "error")
+        box.append(verdict_icon)
+
+        verdict_title = Gtk.Label(
+            label="You can use Nyarch now" if allowed
+            else "You can't use the PC")
+        verdict_title.add_css_class("title-1")
+        box.append(verdict_title)
+
+        verdict_sub = Gtk.Label(
+            label="Age verified. Access granted." if allowed
+            else "Come back when you're older.")
+        verdict_sub.add_css_class("dim-label")
+        box.append(verdict_sub)
+
+        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        # ---- age number + category -------------------------------------
         cat = Gtk.Label(label=age_category(final))
         cat.add_css_class("title-4")
         cat.add_css_class("dim-label")
