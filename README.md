@@ -29,7 +29,7 @@ Performs better than ID verification on all evaluation metrics:
 
 ### Download
 
-Download the .flatpak file form releases and install it.
+Download the .flatpak file from releases and install it.
 
 ### Vibe-coding notice 
 
