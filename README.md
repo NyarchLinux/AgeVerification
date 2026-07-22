@@ -10,10 +10,10 @@ Children might encounter many dangers online, therefore, they should not be allo
 
 - Information about the world
 - Non popular opinions
-- Any type of cospiracy theories (like adding age verification just as an excuse for mass surveillance)
+- Any type of conspiracy theories (like adding age verification just as an excuse for mass surveillance)
 - Scammers
 - Misinformation (according to mainstream media)
-- Linking kid's identities to online information data (this is done only for adults)
+- Linking kids identities to online information data (this is done only for adults)
 - ~Politicians~ P*dophiles
 - People that actually think that age verification is a good idea
 
